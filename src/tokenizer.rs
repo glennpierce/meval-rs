@@ -102,6 +102,8 @@ pub enum Token {
     Number(f64),
     /// A variable.
     Var(String),
+    /// An Alias (For a db list of values)
+    Alias(i32),
     /// A function with name and number of arguments.
     Func(String, Option<usize>),
 }

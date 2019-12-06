@@ -743,8 +743,6 @@ impl<'a> Context<'a> {
             ctx.func("round", f64::round);
             ctx.func("signum", f64::signum);
             ctx.func2("atan2", f64::atan2);
-            ctx.funcn("max", max_array, 1..);
-            ctx.funcn("min", min_array, 1..);
             ctx
         });
 
@@ -821,33 +819,6 @@ impl<'a> Context<'a> {
         );
         self
     }
-
-    /// Adds a new function of a variable number of arguments.
-    ///
-    /// `n_args` specifies the allowed number of variables by giving an exact number `n` or a range
-    /// `n..m`, `..`, `n..`, `..m`. The range is half-open, exclusive on the right, as is common in
-    /// Rust standard library.
-    ///
-    /// # Example
-    ///
-    /// ```rust
-    /// let mut ctx = meval::Context::empty();
-    ///
-    /// // require exactly 2 arguments
-    /// ctx.funcn("sum_two", |xs| xs[0] + xs[1], 2);
-    ///
-    /// // allow an arbitrary number of arguments
-    /// ctx.funcn("sum", |xs| xs.iter().sum(), ..);
-    /// ```
-    pub fn funcn<S, F, N>(&mut self, name: S, func: F, n_args: N) -> &mut Self
-    where
-        S: Into<String>,
-        F: Fn(&[f64]) -> f64 + 'a,
-        N: ArgGuard,
-    {
-        self.funcs.insert(name.into(), n_args.to_arg_guard(func));
-        self
-    }
 }
 
 impl<'a> Default for Context<'a> {
@@ -857,80 +828,6 @@ impl<'a> Default for Context<'a> {
 }
 
 type GuardedFunc<'a> = Rc<Fn(&[f64]) -> Result<f64, FuncEvalError> + 'a>;
-
-/// Trait for types that can specify the number of required arguments for a function with a
-/// variable number of arguments.
-///
-/// # Example
-///
-/// ```rust
-/// let mut ctx = meval::Context::empty();
-///
-/// // require exactly 2 arguments
-/// ctx.funcn("sum_two", |xs| xs[0] + xs[1], 2);
-///
-/// // allow an arbitrary number of arguments
-/// ctx.funcn("sum", |xs| xs.iter().sum(), ..);
-/// ```
-pub trait ArgGuard {
-    fn to_arg_guard<'a, F: Fn(&[f64]) -> f64 + 'a>(self, func: F) -> GuardedFunc<'a>;
-}
-
-impl ArgGuard for usize {
-    fn to_arg_guard<'a, F: Fn(&[f64]) -> f64 + 'a>(self, func: F) -> GuardedFunc<'a> {
-        Rc::new(move |args: &[f64]| {
-            if args.len() == self {
-                Ok(func(args))
-            } else {
-                Err(FuncEvalError::NumberArgs(1))
-            }
-        })
-    }
-}
-
-impl ArgGuard for std::ops::RangeFrom<usize> {
-    fn to_arg_guard<'a, F: Fn(&[f64]) -> f64 + 'a>(self, func: F) -> GuardedFunc<'a> {
-        Rc::new(move |args: &[f64]| {
-            if args.len() >= self.start {
-                Ok(func(args))
-            } else {
-                Err(FuncEvalError::TooFewArguments)
-            }
-        })
-    }
-}
-
-impl ArgGuard for std::ops::RangeTo<usize> {
-    fn to_arg_guard<'a, F: Fn(&[f64]) -> f64 + 'a>(self, func: F) -> GuardedFunc<'a> {
-        Rc::new(move |args: &[f64]| {
-            if args.len() < self.end {
-                Ok(func(args))
-            } else {
-                Err(FuncEvalError::TooManyArguments)
-            }
-        })
-    }
-}
-
-impl ArgGuard for std::ops::Range<usize> {
-    fn to_arg_guard<'a, F: Fn(&[f64]) -> f64 + 'a>(self, func: F) -> GuardedFunc<'a> {
-        Rc::new(move |args: &[f64]| {
-            if args.len() >= self.start && args.len() < self.end {
-                Ok(func(args))
-            } else if args.len() < self.start {
-                Err(FuncEvalError::TooFewArguments)
-            } else {
-                Err(FuncEvalError::TooManyArguments)
-            }
-        })
-    }
-}
-
-impl ArgGuard for std::ops::RangeFull {
-    fn to_arg_guard<'a, F: Fn(&[f64]) -> f64 + 'a>(self, func: F) -> GuardedFunc<'a> {
-        Rc::new(move |args: &[f64]| Ok(func(args)))
-    }
-}
 
 impl<'a> ContextProvider for Context<'a> {
     fn get_var(&self, name: &str) -> Option<f64> {
@@ -943,120 +840,6 @@ impl<'a> ContextProvider for Context<'a> {
     }
 }
 
-#[cfg(feature = "serde")]
-pub mod de {
-    use super::Expr;
-    use serde;
-    use std::fmt;
-    use std::str::FromStr;
-    use tokenizer::Token;
-
-    impl<'de> serde::Deserialize<'de> for Expr {
-        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-        where
-            D: serde::Deserializer<'de>,
-        {
-            struct ExprVisitor;
-
-            impl<'de> serde::de::Visitor<'de> for ExprVisitor {
-                type Value = Expr;
-
-                fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                    formatter.write_str("a math expression")
-                }
-
-                fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
-                where
-                    E: serde::de::Error,
-                {
-                    Expr::from_str(v).map_err(serde::de::Error::custom)
-                }
-
-                fn visit_f64<E>(self, v: f64) -> Result<Self::Value, E>
-                where
-                    E: serde::de::Error,
-                {
-                    Ok(Expr {
-                        rpn: vec![Token::Number(v)],
-                    })
-                }
-
-                fn visit_i64<E>(self, v: i64) -> Result<Self::Value, E>
-                where
-                    E: serde::de::Error,
-                {
-                    Ok(Expr {
-                        rpn: vec![Token::Number(v as f64)],
-                    })
-                }
-
-                fn visit_u64<E>(self, v: u64) -> Result<Self::Value, E>
-                where
-                    E: serde::de::Error,
-                {
-                    Ok(Expr {
-                        rpn: vec![Token::Number(v as f64)],
-                    })
-                }
-            }
-
-            deserializer.deserialize_any(ExprVisitor)
-        }
-    }
-
-    #[cfg(test)]
-    mod tests {
-        use super::*;
-        use de::as_f64;
-        use serde_json;
-        use serde_test;
-        #[test]
-        fn test_deserialization() {
-            use serde_test::Token;
-            let expr = Expr::from_str("sin(x)").unwrap();
-
-            serde_test::assert_de_tokens(&expr, &[Token::Str("sin(x)")]);
-            serde_test::assert_de_tokens(&expr, &[Token::String("sin(x)")]);
-
-            let expr = Expr::from_str("5").unwrap();
-
-            serde_test::assert_de_tokens(&expr, &[Token::F64(5.)]);
-            serde_test::assert_de_tokens(&expr, &[Token::U8(5)]);
-            serde_test::assert_de_tokens(&expr, &[Token::I8(5)]);
-        }
-
-        #[test]
-        fn test_json_deserialization() {
-            #[derive(Deserialize)]
-            struct Ode {
-                #[serde(deserialize_with = "as_f64")]
-                x0: f64,
-                #[serde(deserialize_with = "as_f64")]
-                t0: f64,
-                f: Expr,
-                g: Expr,
-                h: Expr,
-            }
-
-            let config = r#"
-            {
-                "x0": "cos(1.)",
-                "t0": 2,
-                "f": "sin(x)",
-                "g": 2.5,
-                "h": 5
-            }
-            "#;
-            let ode: Ode = serde_json::from_str(config).unwrap();
-
-            assert_eq!(ode.x0, 1f64.cos());
-            assert_eq!(ode.t0, 2f64);
-            assert_eq!(ode.f.bind("x").unwrap()(2.), 2f64.sin());
-            assert_eq!(ode.g.eval().unwrap(), 2.5f64);
-            assert_eq!(ode.h.eval().unwrap(), 5f64);
-        }
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -1117,13 +900,7 @@ mod tests {
             ),
             Ok(2. + 3. * 4.)
         );
-        assert_eq!(
-            eval_str_with_context(
-                "phi(2., 3.)",
-                Context::new().funcn("phi", |xs: &[f64]| xs[0] + xs[1], 2)
-            ),
-            Ok(2. + 3.)
-        );
+     
         let mut m = HashMap::new();
         m.insert("x", 2.);
         m.insert("y", 3.);

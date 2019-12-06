@@ -80,7 +80,7 @@ fn prec_assoc(token: &Token) -> (u32, Associativity) {
             Fact => (5, NA),
             _ => unimplemented!(),
         },
-        Var(_) | Number(_) | Func(..) | LParen | RParen | Comma => (0, NA),
+        Var(_) | Number(_) | Alias(_) | Func(..) | LParen | RParen | Comma => (0, NA),
     }
 }
 
@@ -98,7 +98,7 @@ pub fn to_rpn(input: &[Token]) -> Result<Vec<Token>, RPNError> {
     for (index, token) in input.iter().enumerate() {
         let token = token.clone();
         match token {
-            Number(_) | Var(_) => output.push(token),
+            Number(_) | Var(_) | Alias(_) => output.push(token),
             Unary(_) => stack.push((index, token)),
             Binary(_) => {
                 let pa1 = prec_assoc(&token);
