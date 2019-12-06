@@ -9,18 +9,16 @@
 use nom::{
   branch::alt,
   bytes::complete::is_a,
-  bytes::complete::{escaped, take, tag, take_while},
-  character::complete::{anychar, digit1, multispace0, alphanumeric1, alphanumeric0, char, alpha1, one_of},
-  combinator::{complete, peek, all_consuming, recognize, map, opt, cut, not},
-  error::{context, convert_error, ErrorKind, ParseError, VerboseError},
-  multi::separated_list,
+  bytes::complete::{tag},
+  character::complete::{multispace0, one_of},
+  combinator::{complete, peek, recognize, map, opt},
+  error::{ErrorKind},
   number::complete::double,
-  sequence::{tuple, pair, delimited, preceded, separated_pair, terminated},
-  Err, Needed, IResult
+  sequence::{delimited, preceded, terminated},
+  Err, IResult
 };
 
 use std::fmt;
-use std::str::from_utf8;
 use std::f64;
 
 /// An error reported by the parser.
@@ -168,12 +166,12 @@ fn negpos<'a>(i: &'a str) -> IResult<&'a str, Token, (&'a str, ErrorKind)> {
 
 /// factorial parse
 fn fact<'a>(i: &'a str) -> IResult<&'a str, Token, (&'a str, ErrorKind)> {
-    map(tag("!"), |s: &str| Token::Unary(Operation::Fact))(i)
+    map(tag("!"), |_: &str| Token::Unary(Operation::Fact))(i)
 }
 
 fn ident<'a>(i: &'a str) -> IResult<&'a str, &'a str, (&'a str, ErrorKind)> {
-    let REMAINING_CHARS: &str = "_abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-    let FIRST_CHARS: &str = "_abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    let remaining_chars: &str = "_abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    let first_chars: &str = "_abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
   
     // Returns whole strings matched by the given parser.
     recognize(
@@ -181,9 +179,9 @@ fn ident<'a>(i: &'a str) -> IResult<&'a str, &'a str, (&'a str, ErrorKind)> {
       // Note that returned ok value of `preceded()` is ignored by `recognize()`.
       preceded(
         // Parses a single character contained in the given string.
-        one_of(FIRST_CHARS),
+        one_of(first_chars),
         // Parses the longest slice consisting of the given characters
-        opt(is_a(REMAINING_CHARS)),
+        opt(is_a(remaining_chars)),
       )
     )(i)
   }
@@ -331,9 +329,9 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, TokenParseError> {
             //     let (i, _) = slice_to_offsets(input, p);
             //     return Err(TokenParseError::UnexpectedToken(i));
             // }
-            _ => {
-                panic!("Unexpected parse result when parsing `{}` at `{}`: {:?}", input, s, r);
-            }
+            // _ => {
+            //     panic!("Unexpected parse result when parsing `{}` at `{}`: {:?}", input, s, r);
+            // }
         }
 
     }

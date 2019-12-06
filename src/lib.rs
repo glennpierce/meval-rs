@@ -186,25 +186,12 @@
 #[macro_use]
 extern crate nom;
 extern crate fnv;
-#[cfg(feature = "serde")]
-extern crate serde;
-#[cfg_attr(all(test, feature = "serde"), macro_use)]
-#[cfg(all(test, feature = "serde"))]
-extern crate serde_derive;
-#[cfg(test)]
-extern crate serde_json;
-#[cfg(test)]
-extern crate serde_test;
 
 use std::fmt;
 
 mod expr;
-mod extra_math;
 pub mod shunting_yard;
 pub mod tokenizer;
-
-#[cfg(feature = "serde")]
-pub mod de;
 
 pub use expr::*;
 pub use shunting_yard::RPNError;
@@ -214,6 +201,7 @@ pub use tokenizer::TokenParseError;
 #[derive(Debug, Clone, PartialEq)]
 pub enum Error {
     UnknownVariable(String),
+    UnknownAlias(String),
     Function(String, FuncEvalError),
     /// An error returned by the parser.
     ParseError(TokenParseError),
@@ -228,6 +216,9 @@ impl fmt::Display for Error {
         match *self {
             Error::UnknownVariable(ref name) => {
                 write!(f, "Evaluation error: unknown variable `{}`.", name)
+            }
+            Error::UnknownAlias(ref name) => {
+                write!(f, "Evaluation error: unknown alias `{}`.", name)
             }
             Error::Function(ref name, ref e) => {
                 write!(f, "Evaluation error: function `{}`: {}", name, e)
@@ -264,6 +255,7 @@ impl std::error::Error for Error {
     fn description(&self) -> &str {
         match *self {
             Error::UnknownVariable(_) => "unknown variable",
+            Error::UnknownAlias(_) => "unknown alias",
             Error::Function(_, _) => "function evaluation error",
             Error::EvalError(_) => "eval error",
             Error::ParseError(ref e) => e.description(),

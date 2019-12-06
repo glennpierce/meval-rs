@@ -6,7 +6,6 @@ use std::str::FromStr;
 
 type ContextHashMap<K, V> = FnvHashMap<K, V>;
 
-use extra_math::factorial;
 use shunting_yard::to_rpn;
 use std;
 use std::fmt;
@@ -40,7 +39,7 @@ impl Expr {
     }
 
     /// Evaluates the expression with variables given by the argument.
-    pub fn eval_with_context<C: ContextProvider>(&self, ctx: C) -> Result<f64, Error> {
+    pub fn eval_with_context(&self, ctx: Context) -> Result<f64, Error> {
         use tokenizer::Operation::*;
         use tokenizer::Token::*;
 
@@ -80,13 +79,13 @@ impl Expr {
                     let r = match op {
                         Plus => x,
                         Minus => -x,
-                        Fact => {
-                            // Check to make sure x has no fractional component (can be converted to int without loss)
-                            match factorial(x) {
-                                Ok(res) => res,
-                                Err(e) => return Err(Error::EvalError(String::from(e))),
-                            }
-                        }
+                        // Fact => {
+                        //     // Check to make sure x has no fractional component (can be converted to int without loss)
+                        //     match factorial(x) {
+                        //         Ok(res) => res,
+                        //         Err(e) => return Err(Error::EvalError(String::from(e))),
+                        //     }
+                        // }
                         _ => {
                             return Err(Error::EvalError(format!(
                                 "Unimplemented unary operation: {:?}",
@@ -132,12 +131,17 @@ impl Expr {
     /// # Failure
     ///
     /// Returns `Err` if a missing variable is detected.
-    fn check_context<C: ContextProvider>(&self, ctx: C) -> Result<(), Error> {
+    fn check_context(&self, ctx: Context) -> Result<(), Error> {
         for t in &self.rpn {
             match *t {
                 Token::Var(ref name) => {
                     if ctx.get_var(name).is_none() {
                         return Err(Error::UnknownVariable(name.clone()));
+                    }
+                }
+                Token::Alias(ref id) => {
+                    if ctx.get_aliases_values(*id).is_none() {
+                        return Err(Error::UnknownAlias(id.to_string()));
                     }
                 }
                 Token::Func(ref name, Some(i)) => {
@@ -175,24 +179,11 @@ impl FromStr for Expr {
     type Err = Error;
     /// Constructs an expression by parsing a string.
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let tokens = try!(tokenize(s));
-
-        let rpn = try!(to_rpn(&tokens));
+        let tokens = tokenize(s)?;
+        let rpn = to_rpn(&tokens)?;
 
         Ok(Expr { rpn: rpn })
     }
-}
-
-/// Evaluates a string with the given context.
-///
-/// No built-ins are defined in this case.
-pub fn eval_str_with_context<S: AsRef<str>, C: ContextProvider>(
-    expr: S,
-    ctx: C,
-) -> Result<f64, Error> {
-    let expr = try!(Expr::from_str(expr.as_ref()));
-
-    expr.eval_with_context(ctx)
 }
 
 impl Deref for Expr {
@@ -200,71 +191,6 @@ impl Deref for Expr {
 
     fn deref(&self) -> &[Token] {
         &self.rpn
-    }
-}
-
-/// A trait of a source of variables (and constants) and functions for substitution into an
-/// evaluated expression.
-///
-/// A simplest way to create a custom context provider is to use [`Context`](struct.Context.html).
-///
-/// ## Advanced usage
-///
-/// Alternatively, values of variables/constants can be specified by tuples `(name, value)`,
-/// `std::collections::HashMap` or `std::collections::BTreeMap`.
-///
-/// ```rust
-/// use meval::{ContextProvider, Context};
-///
-/// let mut ctx = Context::new(); // built-ins
-/// ctx.var("x", 2.); // insert a new variable
-/// assert_eq!(ctx.get_var("pi"), Some(std::f64::consts::PI));
-///
-/// let myvars = ("x", 2.); // tuple as a ContextProvider
-/// assert_eq!(myvars.get_var("x"), Some(2f64));
-///
-/// // HashMap as a ContextProvider
-/// let mut varmap = std::collections::HashMap::new();
-/// varmap.insert("x", 2.);
-/// varmap.insert("y", 3.);
-/// assert_eq!(varmap.get_var("x"), Some(2f64));
-/// assert_eq!(varmap.get_var("z"), None);
-/// ```
-///
-/// Custom functions can be also defined.
-///
-/// ```rust
-/// use meval::{ContextProvider, Context};
-///
-/// let mut ctx = Context::new(); // built-ins
-/// ctx.func2("phi", |x, y| x / (y * y));
-///
-/// assert_eq!(ctx.eval_func("phi", &[2., 3.]), Ok(2. / (3. * 3.)));
-/// ```
-///
-/// A `ContextProvider` can be built by combining other contexts:
-///
-/// ```rust
-/// use meval::Context;
-///
-/// let bins = Context::new(); // built-ins
-/// let mut funcs = Context::empty(); // empty context
-/// funcs.func2("phi", |x, y| x / (y * y));
-/// let myvars = ("x", 2.);
-///
-/// // contexts can be combined using tuples
-/// let ctx = ((myvars, bins), funcs); // first context has preference if there's duplicity
-///
-/// assert_eq!(meval::eval_str_with_context("x * pi + phi(1., 2.)", ctx).unwrap(), 2. *
-///             std::f64::consts::PI + 1. / (2. * 2.));
-/// ```
-///
-pub trait ContextProvider {
-    fn get_var(&self, _: &str) -> Option<f64> {
-        None
-    }
-    fn eval_func(&self, _: &str, _: &[f64]) -> Result<f64, FuncEvalError> {
-        Err(FuncEvalError::UnknownFunction)
     }
 }
 
@@ -316,101 +242,6 @@ pub fn builtin<'a>() -> Context<'a> {
     Context::new()
 }
 
-impl<'a, T: ContextProvider> ContextProvider for &'a T {
-    fn get_var(&self, name: &str) -> Option<f64> {
-        (&**self).get_var(name)
-    }
-
-    fn eval_func(&self, name: &str, args: &[f64]) -> Result<f64, FuncEvalError> {
-        (&**self).eval_func(name, args)
-    }
-}
-
-impl<'a, T: ContextProvider> ContextProvider for &'a mut T {
-    fn get_var(&self, name: &str) -> Option<f64> {
-        (&**self).get_var(name)
-    }
-
-    fn eval_func(&self, name: &str, args: &[f64]) -> Result<f64, FuncEvalError> {
-        (&**self).eval_func(name, args)
-    }
-}
-
-impl<T: ContextProvider, S: ContextProvider> ContextProvider for (T, S) {
-    fn get_var(&self, name: &str) -> Option<f64> {
-        self.0.get_var(name).or_else(|| self.1.get_var(name))
-    }
-    fn eval_func(&self, name: &str, args: &[f64]) -> Result<f64, FuncEvalError> {
-        match self.0.eval_func(name, args) {
-            Err(FuncEvalError::UnknownFunction) => self.1.eval_func(name, args),
-            e => e,
-        }
-    }
-}
-
-impl<S: AsRef<str>> ContextProvider for (S, f64) {
-    fn get_var(&self, name: &str) -> Option<f64> {
-        if self.0.as_ref() == name {
-            Some(self.1)
-        } else {
-            None
-        }
-    }
-}
-
-/// `std::collections::HashMap` of variables.
-impl<S> ContextProvider for std::collections::HashMap<S, f64>
-where
-    S: std::hash::Hash + std::cmp::Eq + std::borrow::Borrow<str>,
-{
-    fn get_var(&self, name: &str) -> Option<f64> {
-        self.get(name).cloned()
-    }
-}
-
-/// `std::collections::BTreeMap` of variables.
-impl<S> ContextProvider for std::collections::BTreeMap<S, f64>
-where
-    S: std::cmp::Ord + std::borrow::Borrow<str>,
-{
-    fn get_var(&self, name: &str) -> Option<f64> {
-        self.get(name).cloned()
-    }
-}
-
-impl<S: AsRef<str>> ContextProvider for Vec<(S, f64)> {
-    fn get_var(&self, name: &str) -> Option<f64> {
-        for &(ref n, v) in self.iter() {
-            if n.as_ref() == name {
-                return Some(v);
-            }
-        }
-        None
-    }
-}
-
-// macro for implementing ContextProvider for arrays
-macro_rules! array_impls {
-    ($($N:expr)+) => {
-        $(
-            impl<S: AsRef<str>> ContextProvider for [(S, f64); $N] {
-                fn get_var(&self, name: &str) -> Option<f64> {
-                    for &(ref n, v) in self.iter() {
-                        if n.as_ref() == name {
-                            return Some(v);
-                        }
-                    }
-                    None
-                }
-            }
-        )+
-    }
-}
-
-array_impls! {
-    0 1 2 3 4 5 6 7 8
-}
-
 /// A structure for storing variables/constants and functions to be used in an expression.
 ///
 /// # Example
@@ -429,6 +260,7 @@ array_impls! {
 #[derive(Clone)]
 pub struct Context<'a> {
     vars: ContextHashMap<String, f64>,
+    aliases: ContextHashMap<String, Vec<f64>>,
     funcs: ContextHashMap<String, GuardedFunc<'a>>,
 }
 
@@ -472,8 +304,23 @@ impl<'a> Context<'a> {
     pub fn empty() -> Context<'a> {
         Context {
             vars: ContextHashMap::default(),
+            aliases: ContextHashMap::default(),
             funcs: ContextHashMap::default(),
         }
+    }
+
+    fn get_var(&self, name: &str) -> Option<f64> {
+        self.vars.get(name).cloned()
+    }
+
+    fn get_aliases_values(&self, id: i32) -> Option<Vec<f64>> {
+        self.aliases.get(&id.to_string()).cloned()
+    }
+
+    fn eval_func(&self, name: &str, args: &[f64]) -> Result<f64, FuncEvalError> {
+        self.funcs
+            .get(name)
+            .map_or(Err(FuncEvalError::UnknownFunction), |f| f(args))
     }
 
     /// Adds a new variable/constant.
@@ -548,17 +395,6 @@ impl<'a> Default for Context<'a> {
 
 type GuardedFunc<'a> = Rc<Fn(&[f64]) -> Result<f64, FuncEvalError> + 'a>;
 
-impl<'a> ContextProvider for Context<'a> {
-    fn get_var(&self, name: &str) -> Option<f64> {
-        self.vars.get(name).cloned()
-    }
-    fn eval_func(&self, name: &str, args: &[f64]) -> Result<f64, FuncEvalError> {
-        self.funcs
-            .get(name)
-            .map_or(Err(FuncEvalError::UnknownFunction), |f| f(args))
-    }
-}
-
 
 #[cfg(test)]
 mod tests {
@@ -595,58 +431,5 @@ mod tests {
     #[test]
     fn test_builtins() {
         assert_eq!(eval_str("atan2(1.,2.)"), Ok((1f64).atan2(2.)));
-    }
-
-    #[test]
-    fn test_eval_func_ctx() {
-        use std::collections::{BTreeMap, HashMap};
-        let y = 5.;
-        assert_eq!(
-            eval_str_with_context("phi(2.)", Context::new().func("phi", |x| x + y + 3.)),
-            Ok(2. + y + 3.)
-        );
-        assert_eq!(
-            eval_str_with_context(
-                "phi(2., 3.)",
-                Context::new().func2("phi", |x, y| x + y + 3.)
-            ),
-            Ok(2. + 3. + 3.)
-        );
-        assert_eq!(
-            eval_str_with_context(
-                "phi(2., 3., 4.)",
-                Context::new().func3("phi", |x, y, z| x + y * z)
-            ),
-            Ok(2. + 3. * 4.)
-        );
-     
-        let mut m = HashMap::new();
-        m.insert("x", 2.);
-        m.insert("y", 3.);
-        assert_eq!(eval_str_with_context("x + y", &m), Ok(2. + 3.));
-        assert_eq!(
-            eval_str_with_context("x + z", m),
-            Err(Error::UnknownVariable("z".into()))
-        );
-        let mut m = BTreeMap::new();
-        m.insert("x", 2.);
-        m.insert("y", 3.);
-        assert_eq!(eval_str_with_context("x + y", &m), Ok(2. + 3.));
-        assert_eq!(
-            eval_str_with_context("x + z", m),
-            Err(Error::UnknownVariable("z".into()))
-        );
-    }
-
-    #[test]
-    fn hash_context() {
-        let y = 0.;
-        {
-            let z = 0.;
-
-            let mut ctx = Context::new();
-            ctx.var("x", 1.).func("f", |x| x + y).func("g", |x| x + z);
-            ctx.func2("g", |x, y| x + y);
-        }
     }
 }
