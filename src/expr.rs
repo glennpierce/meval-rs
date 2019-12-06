@@ -43,7 +43,7 @@ impl Expr {
         use tokenizer::Operation::*;
         use tokenizer::Token::*;
 
-        let mut stack = Vec::with_capacity(16);
+        let mut stack : Vec<f64> = Vec::with_capacity(16);
 
         for token in &self.rpn {
             match *token {
@@ -54,6 +54,13 @@ impl Expr {
                         return Err(Error::UnknownVariable(n.clone()));
                     }
                 }
+                // Alias(ref n) => {
+                //     if let Some(v) = ctx.get_aliases_values(*n) {
+                //         stack.push(v);
+                //     } else {
+                //         return Err(Error::UnknownVariable(n.clone()));
+                //     }
+                // }
                 Number(f) => stack.push(f),
                 Binary(op) => {
                     let right = stack.pop().unwrap();
@@ -63,8 +70,8 @@ impl Expr {
                         Minus => left - right,
                         Times => left * right,
                         Div => left / right,
-                        Rem => left % right,
-                        Pow => left.powf(right),
+                        //Rem => left % right,
+                        //Pow => left.powf(right),
                         _ => {
                             return Err(Error::EvalError(format!(
                                 "Unimplemented binary operation: {:?}",
@@ -126,52 +133,52 @@ impl Expr {
         Ok(r)
     }
 
-    /// Checks that the value of every variable in the expression is specified by the context `ctx`.
-    ///
-    /// # Failure
-    ///
-    /// Returns `Err` if a missing variable is detected.
-    fn check_context(&self, ctx: Context) -> Result<(), Error> {
-        for t in &self.rpn {
-            match *t {
-                Token::Var(ref name) => {
-                    if ctx.get_var(name).is_none() {
-                        return Err(Error::UnknownVariable(name.clone()));
-                    }
-                }
-                Token::Alias(ref id) => {
-                    if ctx.get_aliases_values(*id).is_none() {
-                        return Err(Error::UnknownAlias(id.to_string()));
-                    }
-                }
-                Token::Func(ref name, Some(i)) => {
-                    let v = vec![0.; i];
-                    if let Err(e) = ctx.eval_func(name, &v) {
-                        return Err(Error::Function(name.to_owned(), e));
-                    }
-                }
-                Token::Func(_, None) => {
-                    return Err(Error::EvalError(format!(
-                        "expr::check_context: Unexpected token: {:?}",
-                        *t
-                    )));
-                }
-                Token::LParen
-                | Token::RParen
-                | Token::Binary(_)
-                | Token::Unary(_)
-                | Token::Comma
-                | Token::Number(_) => {}
-            }
-        }
-        Ok(())
-    }
+    // /// Checks that the value of every variable in the expression is specified by the context `ctx`.
+    // ///
+    // /// # Failure
+    // ///
+    // /// Returns `Err` if a missing variable is detected.
+    // fn check_context(&self, ctx: Context) -> Result<(), Error> {
+    //     for t in &self.rpn {
+    //         match *t {
+    //             Token::Var(ref name) => {
+    //                 if ctx.get_var(name).is_none() {
+    //                     return Err(Error::UnknownVariable(name.clone()));
+    //                 }
+    //             }
+    //             Token::Alias(ref id) => {
+    //                 if ctx.get_aliases_values(*id).is_none() {
+    //                     return Err(Error::UnknownAlias(id.to_string()));
+    //                 }
+    //             }
+    //             Token::Func(ref name, Some(i)) => {
+    //                 let v = vec![0.; i];
+    //                 if let Err(e) = ctx.eval_func(name, &v) {
+    //                     return Err(Error::Function(name.to_owned(), e));
+    //                 }
+    //             }
+    //             Token::Func(_, None) => {
+    //                 return Err(Error::EvalError(format!(
+    //                     "expr::check_context: Unexpected token: {:?}",
+    //                     *t
+    //                 )));
+    //             }
+    //             Token::LParen
+    //             | Token::RParen
+    //             | Token::Binary(_)
+    //             | Token::Unary(_)
+    //             | Token::Comma
+    //             | Token::Number(_) => {}
+    //         }
+    //     }
+    //     Ok(())
+    // }
+    
 }
 
 /// Evaluates a string with built-in constants and functions.
 pub fn eval_str<S: AsRef<str>>(expr: S) -> Result<f64, Error> {
-    let expr = try!(Expr::from_str(expr.as_ref()));
-
+    let expr = Expr::from_str(expr.as_ref())?;
     expr.eval_with_context(builtin())
 }
 
@@ -393,13 +400,12 @@ impl<'a> Default for Context<'a> {
     }
 }
 
-type GuardedFunc<'a> = Rc<Fn(&[f64]) -> Result<f64, FuncEvalError> + 'a>;
+type GuardedFunc<'a> = Rc<dyn Fn(&[f64]) -> Result<f64, FuncEvalError> + 'a>;
 
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::str::FromStr;
     use Error;
 
     #[test]
